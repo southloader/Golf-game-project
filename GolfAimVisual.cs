@@ -27,6 +27,12 @@ public class GolfAimVisual3D : MonoBehaviour
     public float minPowerHeight = 0.01f;
     public float maxPowerHeight = 4.0f;
 
+    [Header("Ground Alignment")]
+    public LayerMask groundLayer;
+    public float visualHeightAboveGround = 0.35f;
+    public float groundRayStartHeight = 10f;
+    public float groundRayDistance = 30f;
+
     [Header("Vertical Arrow Rotation")]
     public VerticalRotateAxis verticalRotateAxis = VerticalRotateAxis.LocalX;
     public bool invertVerticalAngle = true;
@@ -56,7 +62,20 @@ public class GolfAimVisual3D : MonoBehaviour
 
     private void UpdateRootPositionAndHorizontalAngle()
     {
-        aimVisualRoot.position = ball.transform.position + Vector3.up * rootHeightOffset;
+        Vector3 basePosition = ball.transform.position;
+
+        Vector3 rayStart = basePosition + Vector3.up * groundRayStartHeight;
+
+        if (Physics.Raycast(rayStart, Vector3.down, out RaycastHit hit, groundRayDistance, groundLayer))
+        {
+            basePosition = hit.point + Vector3.up * visualHeightAboveGround;
+        }
+        else
+        {
+            basePosition = ball.transform.position + Vector3.up * rootHeightOffset;
+        }
+
+        aimVisualRoot.position = basePosition;
 
         aimVisualRoot.rotation = Quaternion.Euler(
             0f,

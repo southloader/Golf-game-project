@@ -7,6 +7,11 @@ public class GolfCameraDirector : MonoBehaviour
     public Transform ballTransform;
     public Rigidbody ballRigidbody;
 
+    [Header("Aim Target")]
+    public Transform holeCupTarget;
+    public bool alignAimToHoleWhenAimStarts = true;
+    public bool alignAimToHoleOnStart = true;
+
     [Header("Phase 1 - Horizontal Aim")]
     public float phase1Distance = 7f;
     public float phase1Height = 5f;
@@ -35,10 +40,18 @@ public class GolfCameraDirector : MonoBehaviour
     public float followMoveSmooth = 4f;
     public float followRotateSmooth = 5f;
 
-    [Header("Return To Aim")]
-    public float returnMoveSmooth = 6f;
-    public float returnRotateSmooth = 8f;
-    public bool snapToAimWhenPhaseChanges = false;
+    [Header("Cinematic Override")]
+    public float cinematicMoveSmooth = 3f;
+    public float cinematicRotateSmooth = 5f;
+    public bool cinematicLookAtBallIfNoTarget = true;
+    public float cinematicBallLookHeight = 1.0f;
+
+    [Header("Cinematic Rules")]
+    public bool exitCinematicWhenShotFired = true;
+
+    private bool isCinematicActive = false;
+    private Transform cinematicCameraPoint;
+    private Transform cinematicLookTarget;
 
     private CustomPhysicsBall.ShotPhase previousPhase;
     private Vector3 lastFlatMoveDirection = Vector3.forward;
@@ -46,14 +59,14 @@ public class GolfCameraDirector : MonoBehaviour
     void Start()
     {
         if (ball != null)
-        {
             previousPhase = ball.currentPhase;
-        }
 
         if (ballTransform != null)
         {
-            Vector3 initialForward = GetAimForward();
-            lastFlatMoveDirection = initialForward;
+            if (alignAimToHoleOnStart)
+                AlignAimAngleToHole();
+
+            lastFlatMoveDirection = GetAimForward();
 
             transform.position = GetPhase1Position();
             LookAt(GetPhase1LookTarget(), true);
@@ -72,18 +85,18 @@ public class GolfCameraDirector : MonoBehaviour
             previousPhase = ball.currentPhase;
         }
 
+        // 핵심: 시네마틱 존 안에 있으면 기존 카메라워크를 덮어쓴다.
+        if (isCinematicActive && cinematicCameraPoint != null)
+        {
+            UpdateCinematicCamera();
+            return;
+        }
+
         Vector3 targetPosition = GetTargetPosition();
         Vector3 lookTarget = GetLookTarget();
 
         float moveSmooth = GetCurrentMoveSmooth();
         float rotateSmooth = GetCurrentRotateSmooth();
-
-        if (snapToAimWhenPhaseChanges && phaseChanged && ball.currentPhase != CustomPhysicsBall.ShotPhase.Fired)
-        {
-            transform.position = targetPosition;
-            LookAt(lookTarget, true);
-            return;
-        }
 
         transform.position = Vector3.Lerp(
             transform.position,
@@ -94,19 +107,150 @@ public class GolfCameraDirector : MonoBehaviour
         LookAt(lookTarget, false, rotateSmooth);
     }
 
-    private void OnPhaseChanged(CustomPhysicsBall.ShotPhase from, CustomPhysicsBall.ShotPhase to)
+    private void UpdateCinematicCamera()
     {
-        // 공이 멈추고 Fired에서 Phase1로 돌아온 순간
-        // 추적 중이던 방향을 버리고, 현재 조준 방향 기준으로 다시 정렬한다.
-        if (from == CustomPhysicsBall.ShotPhase.Fired &&
-            to == CustomPhysicsBall.ShotPhase.Phase1_HorizontalAngle)
+        transform.position = Vector3.Lerp(
+            transform.position,
+            cinematicCameraPoint.position,
+            Time.deltaTime * cinematicMoveSmooth
+        );
+
+        Vector3 lookTarget;
+
+        if (cinematicLookTarget != null)
+        {
+            lookTarget = cinematicLookTarget.position;
+        }
+        else if (cinematicLookAtBallIfNoTarget && ballTransform != null)
+        {
+            lookTarget = ballTransform.position + Vector3.up * cinematicBallLookHeight;
+        }
+        else
+        {
+            // LookTarget이 없고 공도 안 보게 할 경우,
+            // CinematicCameraPoint의 회전을 그대로 따라간다.
+            Quaternion targetRot = cinematicCameraPoint.rotation;
+
+            transform.rotation = Quaternion.Slerp(
+                transform.rotation,
+                targetRot,
+                Time.deltaTime * cinematicRotateSmooth
+            );
+
+            return;
+        }
+
+        LookAt(lookTarget, false, cinematicRotateSmooth);
+    }
+
+    public void EnterCinematicZone(Transform cameraPoint, Transform lookTarget = null)
+    {
+        // 시네마틱 카메라는 공이 날아가는 중에만 작동
+        if (ball == null || ball.currentPhase != CustomPhysicsBall.ShotPhase.Fired)
+            return;
+
+        isCinematicActive = true;
+        cinematicCameraPoint = cameraPoint;
+        cinematicLookTarget = lookTarget;
+    }
+
+    public void ExitCinematicZone(Transform cameraPoint)
+    {
+        // 여러 시네마틱 존이 겹쳤을 때,
+        // 현재 사용 중인 카메라 포인트를 가진 존만 해제하게 함.
+        if (cinematicCameraPoint != cameraPoint)
+            return;
+
+        isCinematicActive = false;
+        cinematicCameraPoint = null;
+        cinematicLookTarget = null;
+
+        // 복귀 순간에 추적 방향을 다시 잡아준다.
+        if (ball.currentPhase == CustomPhysicsBall.ShotPhase.Fired)
+        {
+            Vector3 velocity = GetBallVelocity();
+            Vector3 flatVelocity = new Vector3(velocity.x, 0f, velocity.z);
+
+            if (flatVelocity.magnitude > minFollowSpeed)
+                lastFlatMoveDirection = flatVelocity.normalized;
+        }
+        else
         {
             lastFlatMoveDirection = GetAimForward();
         }
+    }
+    private void AlignAimAngleToHole()
+    {
+        if (ball == null || ballTransform == null || holeCupTarget == null)
+            return;
 
-        // Phase3에서 발사되는 순간에는 현재 발사 방향을 추적 방향 초기값으로 삼는다.
+        Vector3 directionToHole = holeCupTarget.position - ballTransform.position;
+
+        // 수평 방향만 사용
+        directionToHole.y = 0f;
+
+        if (directionToHole.sqrMagnitude < 0.001f)
+            return;
+
+        directionToHole.Normalize();
+
+        // Unity 기준:
+        // +Z 방향이 0도
+        // +X 방향이 90도
+        float angleToHole = Mathf.Atan2(directionToHole.x, directionToHole.z) * Mathf.Rad2Deg;
+
+        ball.horizontalAngle = angleToHole;
+    }
+
+    private void OnPhaseChanged(CustomPhysicsBall.ShotPhase from, CustomPhysicsBall.ShotPhase to)
+    {
+        // 공이 멈춰서 다시 조준 상태로 돌아온 순간
+        if (from == CustomPhysicsBall.ShotPhase.Fired &&
+            to == CustomPhysicsBall.ShotPhase.Phase1_HorizontalAngle)
+        {
+            if (alignAimToHoleWhenAimStarts)
+                AlignAimAngleToHole();
+
+            lastFlatMoveDirection = GetAimForward();
+
+            // 공이 시네마틱 존 안에서 멈춰도 조준 상태에서는 기본 카메라로 복귀
+            ForceExitCinematicZone();
+        }
+
+        // 공을 새로 치는 순간
         if (to == CustomPhysicsBall.ShotPhase.Fired)
         {
+            lastFlatMoveDirection = GetAimForward();
+
+            // 공을 치는 순간에도 시네마틱 카메라 강제 해제
+            if (exitCinematicWhenShotFired)
+            {
+                ForceExitCinematicZone();
+            }
+        }
+    }
+    public void ForceExitCinematicZone()
+    {
+        isCinematicActive = false;
+        cinematicCameraPoint = null;
+        cinematicLookTarget = null;
+
+        if (ball != null && ball.currentPhase == CustomPhysicsBall.ShotPhase.Fired)
+        {
+            Vector3 velocity = GetBallVelocity();
+            Vector3 flatVelocity = new Vector3(velocity.x, 0f, velocity.z);
+
+            if (flatVelocity.magnitude > minFollowSpeed)
+            {
+                lastFlatMoveDirection = flatVelocity.normalized;
+            }
+            else
+            {
+                lastFlatMoveDirection = GetAimForward();
+            }
+        }
+        else
+        {   
             lastFlatMoveDirection = GetAimForward();
         }
     }
@@ -172,7 +316,6 @@ public class GolfCameraDirector : MonoBehaviour
         Vector3 right = GetAimRight();
         Vector3 ballPos = ballTransform.position;
 
-        // 옆에서 보되, 너무 완전한 측면이면 방향감이 사라져서 살짝 뒤로 뺌
         return ballPos + right * phase2SideDistance - forward * phase2BackDistance + Vector3.up * phase2Height;
     }
 
@@ -204,9 +347,7 @@ public class GolfCameraDirector : MonoBehaviour
         Vector3 flatVelocity = new Vector3(velocity.x, 0f, velocity.z);
 
         if (flatVelocity.magnitude > minFollowSpeed)
-        {
             lastFlatMoveDirection = flatVelocity.normalized;
-        }
 
         return ballTransform.position
                - lastFlatMoveDirection * followDistance
@@ -219,9 +360,7 @@ public class GolfCameraDirector : MonoBehaviour
         Vector3 flatVelocity = new Vector3(velocity.x, 0f, velocity.z);
 
         if (flatVelocity.magnitude > minFollowSpeed)
-        {
             lastFlatMoveDirection = flatVelocity.normalized;
-        }
 
         return ballTransform.position
                + Vector3.up * 1.0f
@@ -246,8 +385,7 @@ public class GolfCameraDirector : MonoBehaviour
             return Vector3.zero;
 
         return ballRigidbody.linearVelocity;
-
-        // Unity 버전에 따라 linearVelocity에서 에러가 나면 위 줄 대신 아래 줄 사용
+        // Unity 버전에 따라 에러 나면 아래 사용
         // return ballRigidbody.velocity;
     }
 
@@ -256,7 +394,6 @@ public class GolfCameraDirector : MonoBehaviour
         if (ball.currentPhase == CustomPhysicsBall.ShotPhase.Fired)
             return followMoveSmooth;
 
-        // Fired에서 Phase1로 돌아온 직후도 결국 조준 상태이므로 aim smooth 사용
         return aimMoveSmooth;
     }
 

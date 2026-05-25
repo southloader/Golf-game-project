@@ -1,5 +1,12 @@
 fileFormatVersion: 2
 guid: 1c92e6cecbd59914baa019c8cd7765d1
+AssetOrigin:
+  serializedVersion: 1
+  productId: 364358
+  packageName: (FREE) Ground Textures
+  packageVersion: 1.0
+  assetPath: Assets/AspectStudios/FREE Ground Textures/Materials/Textures/Dirt/Dirt1_Diffuse.png
+  uploadId: 870374
 TextureImporter:
   internalIDToNameTable: []
   externalObjects: {}
@@ -115,10 +122,3 @@ TextureImporter:
   userData: 
   assetBundleName: 
   assetBundleVariant: 
-AssetOrigin:
-  serializedVersion: 1
-  productId: 364358
-  packageName: (FREE) Ground Textures
-  packageVersion: 1.0
-  assetPath: Assets/AspectStudios/FREE Ground Textures/Materials/Textures/Dirt/Dirt1_Diffuse.png
-  uploadId: 870374

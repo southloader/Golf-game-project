@@ -12,6 +12,9 @@ public class CustomPhysicsBall : MonoBehaviour
         Fired
     }
 
+    [Header("Game Info")]
+    public int strokeCount = 0;
+
     [Header("Current State")]
     public ShotPhase currentPhase = ShotPhase.Phase1_HorizontalAngle;
 
@@ -144,6 +147,7 @@ public class CustomPhysicsBall : MonoBehaviour
 
     private void Shoot()
     {
+        strokeCount++;
         Vector3 shootDirection = Quaternion.Euler(-verticalAngle, horizontalAngle, 0f) * Vector3.forward;
         rb.useGravity = true;
         rb.linearVelocity = shootDirection * power;
@@ -187,7 +191,13 @@ public class CustomPhysicsBall : MonoBehaviour
                 Ray ray = new Ray(simPosition, displacement.normalized);
                 RaycastHit hit;
 
-                if (Physics.Raycast(ray, out hit, displacement.magnitude))
+                if (Physics.Raycast(
+                    ray,
+                    out hit,
+                    displacement.magnitude,
+                    ~0,
+                    QueryTriggerInteraction.Ignore
+                ))
                 {
                     simPosition = hit.point;
 
