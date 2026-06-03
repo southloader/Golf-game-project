@@ -174,7 +174,8 @@ public class CustomPhysicsBall : MonoBehaviour
 
         Vector3 simPosition = transform.position;
         Vector3 shootDirection = Quaternion.Euler(-verticalAngle, horizontalAngle, 0f) * Vector3.forward;
-        Vector3 simVelocity = shootDirection * power;
+        float activePower = (power <= 0f) ? 15f : power;
+        Vector3 simVelocity = shootDirection * activePower;
         
         bool isSimGrounded = false;
         float currentSimFriction = defaultFriction;
